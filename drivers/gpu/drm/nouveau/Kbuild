@@ -3,6 +3,7 @@ ccflags-y += -I $(src)/include
 ccflags-y += -I $(src)/include/nvkm
 ccflags-y += -I $(src)/nvkm
 ccflags-y += -I $(src)/nvkm/subdev/gsp
+ccflags-y += -I $(src)/tensor_unlock
 ccflags-y += -I $(src)
 ccflags-$(NOUVEAU_LAB_PIN_GSP) += -DNOUVEAU_LAB_PIN_GSP_615
 
@@ -73,6 +74,10 @@ nouveau-y += nv50_fence.o
 nouveau-y += nv84_fence.o
 nouveau-y += nvc0_fence.o
 nouveau-y += gv100_fence.o
+
+# Tensor unlock for Ampere / Ada
+include $(src)/tensor_unlock/Kbuild
+
 # Force nvgd as module regardless of kernel in-tree CONFIG_DRM_NOUVEAU state
 obj-y :=
 obj-m := nvgd.o

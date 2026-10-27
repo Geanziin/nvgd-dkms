@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+nouveau-y += tensor_unlock/tensor_unlock.o
+nouveau-y += tensor_unlock/unlock_610.o
+nouveau-y += tensor_unlock/prep_610.o
+nouveau-y += tensor_unlock/layout_610.o
+nouveau-y += tensor_unlock/vbios_610.o
+nouveau-y += tensor_unlock/gfw_eval.o

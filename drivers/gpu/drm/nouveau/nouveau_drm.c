@@ -75,6 +75,7 @@
 #include "nouveau_exec.h"
 #include "nouveau_uvmm.h"
 #include "nouveau_sched.h"
+#include "tensor_unlock/tensor_unlock.h"
 
 DECLARE_DYNDBG_CLASSMAP(drm_debug_classes, DD_CLASS_TYPE_DISJOINT_BITS, 0,
 			"DRM_UT_CORE",
@@ -112,6 +113,14 @@ module_param_named(atomic, nouveau_atomic, int, 0400);
 MODULE_PARM_DESC(runpm, "disable (0), force enable (1), optimus only default (-1)");
 static int nouveau_runtime_pm = -1;
 module_param_named(runpm, nouveau_runtime_pm, int, 0400);
+
+int nvgd_tensor_unlock_enabled = 1;
+module_param_named(tensor_unlock, nvgd_tensor_unlock_enabled, int, 0444);
+MODULE_PARM_DESC(tensor_unlock, "Enable tensor core speed-select unlock for supported GPUs (0=disable, 1=enable default)");
+
+int nvgd_tensor_unlock_experimental = 0;
+module_param_named(tensor_unlock_experimental, nvgd_tensor_unlock_experimental, int, 0444);
+MODULE_PARM_DESC(tensor_unlock_experimental, "Enable experimental tensor core speed-select unlock for unvalidated cards (0=disable default, 1=enable)");
 
 static struct drm_driver driver_stub;
 static struct drm_driver driver_pci;
@@ -872,6 +881,8 @@ static int nouveau_drm_probe(struct pci_dev *pdev,
 
 	if (vga_switcheroo_client_probe_defer(pdev))
 		return -EPROBE_DEFER;
+
+	nvgd_tensor_unlock(pdev);
 
 	/* We need to check that the chipset is supported before booting
 	 * fbdev off the hardware, as there's no way to put it back.
