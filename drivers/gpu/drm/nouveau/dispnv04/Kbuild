@@ -12,4 +12,5 @@ nouveau-y += dispnv04/tvmodesnv17.o
 nouveau-y += dispnv04/tvnv04.o
 nouveau-y += dispnv04/tvnv17.o
 
-include $(src)/dispnv04/i2c/Kbuild
+# Legacy I2C TV encoders (ch7006, sil164) omitted for modern Turing+ nvgd driver
+# include $(src)/dispnv04/i2c/Kbuild
