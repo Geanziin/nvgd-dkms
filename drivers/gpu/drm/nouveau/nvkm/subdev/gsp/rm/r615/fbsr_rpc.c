@@ -6,12 +6,13 @@
 #include <rm/rm.h>
 #include "rpc.h"
 #include "fbsr.h"
+#include "r615_family.h"
 
 static bool
 r615_fbsr_compatible(struct nvkm_gsp *gsp)
 {
 	return gsp && gsp->rm && gsp->rm->version && !strcmp(gsp->rm->version, "615.78.08") &&
-	       gsp->subdev.device && gsp->subdev.device->chipset == 0x177;
+	       gsp->subdev.device && r615_chipset_supported(gsp->subdev.device->chipset);
 }
 
 int

@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT
 /* Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
- * r615 RM impl for GA107 (615.78.08). Native WPR/transport/CTRL/ALLOC.
+ * r615 RM impl for GA107 and AD10x (615.78.08). Native WPR/transport/CTRL/ALLOC.
  * Engine adapters still require per-schema 615 validation.
+ *
+ * The WPR and API here are family-generic, not GA107-specific: the LibOS3
+ * carveout (OS 22M, RM base 8M "Turing thru Ada", heap min 88M, 96K/GB)
+ * comes from R615 gsp_fw_heap.h for all of Turing..Ada, and the r535/r570
+ * adapters are the same ones the AD10x r535/r570 paths already use. The
+ * symbol keeps its GA102-era name; do not read a chip restriction into it.
  */
 #include <rm/rm.h>
 

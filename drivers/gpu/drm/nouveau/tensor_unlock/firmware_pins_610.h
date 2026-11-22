@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Pinned firmware/artifacts-610.43.03.json digests; checked by host tests. */
+/* Pinned firmware digests; see reference/nvidia/gpu-unlock-610.43.03/
+ * artifacts-610.43.03.json (upstream manifest, item 9) for source URLs,
+ * archive SHA-256, extraction method and per-asset hashes. The digests
+ * below are checked by host tests. */
 #ifndef GPU_UNLOCK_FIRMWARE_PINS_610_H
 #define GPU_UNLOCK_FIRMWARE_PINS_610_H
 

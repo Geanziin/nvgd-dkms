@@ -4,6 +4,7 @@
 #include <rm/rm.h>
 
 #include "rusd_session.h"
+#include "r615_family.h"
 
 struct r615_rusd_session {
 	struct nvkm_gsp *gsp;
@@ -17,7 +18,7 @@ r615_rusd_session_compatible(struct nvkm_gsp *gsp)
 {
 	return gsp && gsp->rm && gsp->rm->version &&
 	       !strcmp(gsp->rm->version, "615.78.08") && gsp->rm->api &&
-	       gsp->rm->api->ctrl && gsp->subdev.device->chipset == 0x177;
+	       gsp->rm->api->ctrl && r615_chipset_supported(gsp->subdev.device->chipset);
 }
 
 static int

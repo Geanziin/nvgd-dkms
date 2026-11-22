@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /* Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
- * r615 GSP-RM ops for GA107 (615.78.08). Native cold-boot handoff,
+ * r615 GSP-RM ops for GA107 and AD10x (615.78.08). Native cold-boot handoff,
  * NVKV static info and engine-ID integration. Runtime lives in runtime.c;
  * inherited engine adapters remain subject to per-schema validation.
  */
@@ -18,6 +18,7 @@
 
 #include "boot.h"
 #include "bootmem.h"
+#include "r615_family.h"
 #include "sysinfo.h"
 
 /* Validated against 615.78.08 public sources:
@@ -32,7 +33,7 @@ r615_gsp_compatible(struct nvkm_gsp *gsp)
 	return gsp && gsp->rm && gsp->rm->version &&
 	       !strcmp(gsp->rm->version, "615.78.08") &&
 	       gsp->subdev.device &&
-	       gsp->subdev.device->chipset == 0x177;
+	       r615_chipset_supported(gsp->subdev.device->chipset);
 }
 
 static u32

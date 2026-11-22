@@ -587,6 +587,53 @@ nouveau_parent = {
 	.errorf = nouveau_drm_errorf,
 };
 
+/* Tensor unlock (nvgd) sysfs exposure: the current FEAT speed-select
+ * state, read-only. /sys/bus/pci/devices/<bdf>/tensor_unlock is 1 when the
+ * unlock is active; tensor_unlock_state carries the raw words
+ * (supported/unlocked/ss0/ss1/readout/plm) for nvgd-status and telemetry.
+ * The group is only visible on supported/experimental GPUs; on other
+ * devices the unlock never ran and there is no state to show. */
+static ssize_t
+tensor_unlock_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct nvgd_tensor_unlock_state state;
+
+	nvgd_tensor_unlock_read_state(to_pci_dev(dev), &state);
+	return sysfs_emit(buf, "%u\n", state.unlocked);
+}
+static DEVICE_ATTR_RO(tensor_unlock);
+
+static ssize_t
+tensor_unlock_state_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct nvgd_tensor_unlock_state state;
+
+	nvgd_tensor_unlock_read_state(to_pci_dev(dev), &state);
+	return sysfs_emit(buf, "supported=%u unlocked=%u ss0=%#010x ss1=%#010x readout=%#010x plm=%#010x\n",
+			  state.supported, state.unlocked, state.ss0, state.ss1, state.readout, state.plm);
+}
+static DEVICE_ATTR_RO(tensor_unlock_state);
+
+static struct attribute *nouveau_tensor_unlock_attrs[] = {
+	&dev_attr_tensor_unlock.attr,
+	&dev_attr_tensor_unlock_state.attr,
+	NULL,
+};
+
+static umode_t
+nouveau_tensor_unlock_visible(struct kobject *kobj, struct attribute *attr, int index)
+{
+	struct nvgd_tensor_unlock_state state;
+
+	nvgd_tensor_unlock_read_state(to_pci_dev(kobj_to_dev(kobj)), &state);
+	return state.supported ? attr->mode : 0;
+}
+
+static const struct attribute_group nouveau_tensor_unlock_group = {
+	.attrs = nouveau_tensor_unlock_attrs,
+	.is_visible = nouveau_tensor_unlock_visible,
+};
+
 static void
 nouveau_drm_device_fini(struct nouveau_drm *drm)
 {
@@ -603,6 +650,10 @@ nouveau_drm_device_fini(struct nouveau_drm *drm)
 	nouveau_dmem_fini(drm);
 	nouveau_svm_fini(drm);
 	nouveau_gsp_telemetry_fini(dev);
+	if (drm->tensor_unlock_sysfs_registered) {
+		sysfs_remove_group(&drm->dev->dev->kobj, &nouveau_tensor_unlock_group);
+		drm->tensor_unlock_sysfs_registered = false;
+	}
 	nouveau_hwmon_fini(dev);
 	nouveau_debugfs_fini(drm);
 
@@ -693,6 +744,10 @@ nouveau_drm_device_init(struct nouveau_drm *drm)
 	nouveau_hwmon_init(dev);
 	if (nouveau_gsp_telemetry_init(dev))
 		NV_WARN(drm, "GSP telemetry exposure failed\n");
+	if (sysfs_create_group(&drm->dev->dev->kobj, &nouveau_tensor_unlock_group))
+		NV_WARN(drm, "Tensor unlock sysfs exposure failed\n");
+	else
+		drm->tensor_unlock_sysfs_registered = true;
 	nouveau_svm_init(drm);
 	nouveau_dmem_init(drm);
 	nouveau_led_init(dev);
@@ -1048,6 +1103,11 @@ nouveau_do_resume(struct nouveau_drm *drm, bool runtime)
 	nouveau_led_resume(dev);
 	nouveau_dmem_resume(drm);
 	nouveau_svm_resume(drm);
+	/* The tensor unlock is NOT re-applied here: the transaction needs a
+	 * cold, unbound GPU and re-running FLR + SEC2 under a bound,
+	 * resumed driver is untested. Report whether the unlock survived
+	 * suspend instead (nvgd_tensor_unlock_status). */
+	nvgd_tensor_unlock_status(to_pci_dev(dev->dev));
 	return 0;
 }
 

@@ -4,6 +4,7 @@
 #include <linux/string.h>
 
 #include "bootmem.h"
+#include "r615_family.h"
 
 #define R615_MIB 0x100000ULL
 #define R615_PRESCRUB_BYTES (256ULL << 20)
@@ -118,7 +119,7 @@ r615_wpr_build(const char *version, const struct r615_wpr_config *input,
 #endif
 	if (!input || !output)
 		return -EINVAL;
-	if (!version || strcmp(version, "615.78.08") || input->chipset != 0x177)
+	if (!version || strcmp(version, "615.78.08") || !r615_chipset_supported(input->chipset))
 		return -EOPNOTSUPP;
 	config = *input;
 	if (config.fb_bytes < R615_PRESCRUB_BYTES || config.fb_bytes > (1ULL << 40) ||

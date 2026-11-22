@@ -23,6 +23,7 @@
 
 #include <linux/string.h>
 
+#include <rm/r615/r615_family.h>
 #include <subdev/fb.h>
 #include <engine/sec2.h>
 
@@ -259,11 +260,17 @@ tu102_gsp_wpr_meta_init(struct nvkm_gsp *gsp)
 	meta->verified = 0;
 	/* 615 hybrid: GspFwWprMetaV1 carries the clock-boost flag (BIT0) in
 	 * the byte the legacy struct calls padding[0]; every other byte is
-	 * identical. The 615 producer sets it by default. GA107 + 615 only.
-	 * (A forced verified=0xa0.. probe changed nothing; reverted.)
+	 * identical. The 615 producer sets it by default: in R615
+	 * kgspPopulateWprMeta_TU102 the flag follows
+	 * bBootGspRmWithBoostClocks, which defaults to NV_TRUE
+	 * (g_kernel_gsp_nvoc.c) and is only cleared by a registry override
+	 * or for two non-Ada device IDs — and the TU102 HAL is dispatched
+	 * for TU102..AD107. So every r615-supported chipset gets it, not
+	 * GA107 alone. (A forced verified=0xa0.. probe changed nothing;
+	 * reverted.)
 	 */
 	if (gsp->rm && gsp->rm->version && !strcmp(gsp->rm->version, "615.78.08") &&
-	    gsp->subdev.device->chipset == 0x177)
+	    r615_chipset_supported(gsp->subdev.device->chipset))
 		meta->padding[0] = 1;
 	return 0;
 }

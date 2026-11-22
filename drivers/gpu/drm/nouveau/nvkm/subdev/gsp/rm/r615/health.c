@@ -13,6 +13,7 @@
 #include <rm/rm.h>
 #include "dma_image.h"
 #include "health.h"
+#include "r615_family.h"
 
 /* Public 615 registers the client shadow NR buffer only for the MMU_FAULT_BUFFER
  * class owned by UVM; ordinary channel faults still arrive as RC_TRIGGERED.
@@ -260,7 +261,7 @@ r615_health_start(struct nvkm_gsp *gsp)
 
 	if (!gsp || !gsp->subdev.device || gsp->r615_health || !gsp->rm ||
 	    !gsp->rm->version || strcmp(gsp->rm->version, "615.78.08") ||
-	    gsp->subdev.device->chipset != 0x177)
+	    !r615_chipset_supported(gsp->subdev.device->chipset))
 		return -EOPNOTSUPP;
 	health = kzalloc_obj(*health, GFP_KERNEL);
 	if (!health)

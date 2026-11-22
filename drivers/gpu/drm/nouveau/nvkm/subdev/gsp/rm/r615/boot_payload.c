@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <core/device.h>
@@ -9,6 +10,7 @@
 #include "boot_payload.h"
 #include "dma_image.h"
 #include "firmware.h"
+#include "r615_family.h"
 
 enum r615_boot_buffer_id {
 	R615_BOOT_LOADER, R615_BOOT_SIGNATURE, R615_BOOT_WPR, R615_BOOT_LIBOS, R615_BOOT_ARGS,
@@ -87,7 +89,7 @@ r615_boot_payload_new(struct nvkm_gsp *gsp, const struct firmware *firmware,
 	    !bootloader || !ucodes || !ucodes->data || !ucodes->size || !environment ||
 	    !quiesce || !output || *output)
 		return -EINVAL;
-	if (gsp->subdev.device->chipset != 0x177 || !gsp->rm || !gsp->rm->version ||
+	if (!r615_chipset_supported(gsp->subdev.device->chipset) || !gsp->rm || !gsp->rm->version ||
 	    strcmp(gsp->rm->version, "615.78.08"))
 		return -EOPNOTSUPP;
 	if (gsp->running)
@@ -135,7 +137,9 @@ r615_boot_payload_new(struct nvkm_gsp *gsp, const struct firmware *firmware,
 	}
 	memcpy(payload->buffers[R615_BOOT_LOADER].cpu, boot.image, boot.image_bytes);
 	memcpy(payload->buffers[R615_BOOT_SIGNATURE].cpu, fw.signature, fw.signature_bytes);
-	config.chipset = 0x177;
+	/* The WPR producer records the real chipset: GA107 and AD10x share
+	 * the TU102 WPR V1 layout, but the meta is per-device. */
+	config.chipset = gsp->subdev.device->chipset;
 	config.fb_bytes = environment->fb_bytes;
 	config.vga_start = environment->vga_start;
 	config.vga_valid = environment->vga_valid;
@@ -183,22 +187,30 @@ r615_boot_payload_request(struct nvkm_gsp *gsp, const struct r615_boot_environme
 			  r615_transport_quiesce_func quiesce, void *context,
 			  struct r615_boot_payload **output)
 {
-	const char * const names[] = {
-		"nvidia/ga107/gsp/gsp-615.78.08.bin",
-		"nvidia/ga107/gsp/bootloader-615.78.08.bin",
-		"nvidia/ga107/gsp/ucodes-615.78.08.bin",
+	/* One firmware set per family: GA10x under nvidia/ga107/gsp/,
+	 * AD10x under nvidia/ad102/gsp/ (ad103..ad107 are symlinks to
+	 * ad102). The GSP-RM image and ucodes are the shared ga10x files;
+	 * booter_load / booter_unload / bootloader are per-family bindata. */
+	char names[3][48];
+	const char * const stems[] = {
+		"gsp-615.78.08.bin",
+		"bootloader-615.78.08.bin",
+		"ucodes-615.78.08.bin",
 	};
+	const char *dir;
 	const struct firmware *files[3] = { 0 };
 	int ret = -EINVAL;
 
 	if (!gsp || !gsp->subdev.device || !gsp->subdev.device->dev || !output || *output)
 		return -EINVAL;
 	if (!gsp->rm || !gsp->rm->version || strcmp(gsp->rm->version, "615.78.08") ||
-	    gsp->subdev.device->chipset != 0x177)
+	    !r615_chipset_supported(gsp->subdev.device->chipset))
 		return -EOPNOTSUPP;
 	if (gsp->running)
 		return -EBUSY;
+	dir = r615_firmware_dir(gsp->subdev.device->chipset);
 	for (u32 i = 0; i < 3; i++) {
+		snprintf(names[i], sizeof(names[i]), "nvidia/%s/gsp/%s", dir, stems[i]);
 		ret = request_firmware(&files[i], names[i], gsp->subdev.device->dev);
 		if (ret)
 			goto done;
@@ -421,3 +433,6 @@ r615_boot_payload_del(struct r615_boot_payload **output)
 MODULE_FIRMWARE("nvidia/ga107/gsp/gsp-615.78.08.bin");
 MODULE_FIRMWARE("nvidia/ga107/gsp/bootloader-615.78.08.bin");
 MODULE_FIRMWARE("nvidia/ga107/gsp/ucodes-615.78.08.bin");
+MODULE_FIRMWARE("nvidia/ad102/gsp/gsp-615.78.08.bin");
+MODULE_FIRMWARE("nvidia/ad102/gsp/bootloader-615.78.08.bin");
+MODULE_FIRMWARE("nvidia/ad102/gsp/ucodes-615.78.08.bin");

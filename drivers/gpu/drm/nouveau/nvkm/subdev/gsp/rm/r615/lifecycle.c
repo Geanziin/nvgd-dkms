@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /* Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
- * r615 GA107 lifecycle (oneinit/init/fini) for 615.78.08.
+ * r615 GA107 and AD10x lifecycle (oneinit/init/fini) for 615.78.08.
  * Native cold boot and retained system-SR; runtime PM remains unsupported.
  * Uses r615_boot_payload + MSGQ 2.0 transport + GMCAPI GSP_INIT.
  * Reuses Booter/FWSEC/reset and GR/disp/fifo engines where wire unchanged.
@@ -23,6 +23,7 @@
 #include "lifecycle.h"
 
 #include "boot_payload.h"
+#include "r615_family.h"
 #include "bootmem.h"
 #include "rpc.h"
 #include "runtime.h"
@@ -97,7 +98,7 @@ r615_lifecycle_compatible(struct nvkm_gsp *gsp)
 	return gsp && gsp->rm && gsp->rm->version &&
 	       !strcmp(gsp->rm->version, "615.78.08") &&
 	       gsp->subdev.device &&
-	       gsp->subdev.device->chipset == 0x177;
+	       r615_chipset_supported(gsp->subdev.device->chipset);
 }
 
 int
@@ -106,7 +107,7 @@ r615_gsp_load(struct nvkm_gsp *gsp, int ver, const struct nvkm_gsp_fwif *fwif)
 	int ret;
 
 	(void)ver;
-	if (gsp->subdev.device->chipset != 0x177)
+	if (!r615_chipset_supported(gsp->subdev.device->chipset))
 		return -EOPNOTSUPP;
 	nvkm_info(&gsp->subdev, "r615: trying 615.78.08 firmware set\n");
 	ret = tu102_gsp_load(gsp, ver, fwif);

@@ -60,27 +60,14 @@ struct gpu_unlock_assets {
 
 /* Select the pinned boot assets and payload for each supported chip. */
 /* Every Ada ID that uses the pinned AD102-family Booter archive, payload and
- * transaction checks. main.c decides admission; this only routes. */
+ * transaction checks. tensor_unlock.c decides admission; this only routes.
+ * The list is the single source in arch_610.h (GPU_UNLOCK_AD10X_IDS). */
 static bool ad102_family(unsigned short device)
 {
 	switch (device) {
-	case GU_AD102_RTX_4090:
-	case GU_AD102_RTX_4090_D:
-	case GU_AD102_RTX_4070_TI_SUPER:
-	case GU_AD103_RTX_4080_SUPER:
-	case GU_AD103_RTX_4080:
-	case GU_AD103_RTX_4070_TI_SUPER:
-	case GU_AD103_RTX_4070:
-	case GU_AD103M_RTX_4090_MOBILE:
-	case GU_AD104_RTX_4070_TI:
-	case GU_AD104_RTX_4070_SUPER:
-	case GU_AD104_RTX_4070:
-	case GU_AD106_RTX_4060_TI:
-	case GU_AD106_RTX_4060_TI_16GB:
-	case GU_AD107_RTX_4060:
-	case GU_AD107_RTX_4060_LAPTOP:
-	case GU_AD107_RTX_4060_MOBILE:
-	case GU_AD107_RTX_4050_MOBILE:
+#define GU_AD10X_CASE(id) case id:
+	GPU_UNLOCK_AD10X_IDS(GU_AD10X_CASE)
+#undef GU_AD10X_CASE
 		return true;
 	default:
 		return false;
@@ -404,11 +391,17 @@ static int ad102_sample_permissions(struct unlock_transaction_work *work,
 		valid = !read_bar(work, ad102_permissions[i].offset, &values[i]) &&
 			(values[i] & 0xffff0000u) != 0xbadf0000u && accessible;
 		dev_info(&work->pdev->dev,
-			 "AD102 permission %s: %s[%#x]=%#x before=%#x expected=%#x required=%u valid=%u pci=%#x chip=%#x\n",
+			 "AD10x permission %s: %s[%#x]=%#x before=%#x expected=%#x required=%u valid=%u pci=%#x chip=%#x\n",
 			 phase, ad102_permissions[i].name, ad102_permissions[i].offset,
 			 values[i], work->permission_before[i], ad102_permissions[i].expected,
 			 ad102_permissions[i].required, valid, identity, chip);
-		if (!valid)
+		/* Only a required sample gates the transaction: FBPA is
+		 * required=false, so an unreadable FBPA is logged (value 0)
+		 * for diagnosis but must not abort the unlock — the
+		 * after-payload required check below already enforces only
+		 * the required entries. Before this, any invalid sample
+		 * returned -ENODEV, so the flag in the table was dead. */
+		if (!valid && ad102_permissions[i].required)
 			ret = -ENODEV;
 	}
 	return GU_RESULT(ret);
@@ -422,8 +415,8 @@ static int ad102_readout(struct unlock_transaction_work *work, const char *phase
 	bool valid = !ret && !inaccessible(value);
 
 	dev_info(&work->pdev->dev,
-		 "AD102 %s: readout1=%#x fields=%u %u %u %u %u %u %u %u %u valid=%u full=%u\n",
-		 phase, value, value & 7, (value >> 3) & 7, (value >> 6) & 7,
+		 "AD10x %s: device=%#06x readout1=%#x fields=%u %u %u %u %u %u %u %u %u valid=%u full=%u\n",
+		 phase, work->pdev->device, value, value & 7, (value >> 3) & 7, (value >> 6) & 7,
 		 (value >> 9) & 7, (value >> 12) & 7, (value >> 15) & 7,
 		 (value >> 18) & 7, (value >> 21) & 7, (value >> 24) & 7,
 		 valid, valid && !(value & GU_SPEED_READOUT_MASK));
@@ -617,7 +610,7 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 	    (!work->v67_cpu || !work->v67_fw ||
 	     work->v67_fw->size != GU_V67_SIZE ||
 	     memcmp(work->v67_cpu, work->v67_fw->data, GU_V67_SIZE))) {
-		dev_err(&work->pdev->dev, "AD102 payload copy changed before SEC2 start; aborting\n");
+		dev_err(&work->pdev->dev, "AD10x payload copy changed before SEC2 start; aborting\n");
 		return GU_RESULT(-EIO);
 	}
 	if (read_bar(work, eng->fbif + 0x24, &trans) || inaccessible(trans))
@@ -731,18 +724,31 @@ static int load_booter(struct unlock_transaction_work *work)
 static int patch_booter(struct unlock_transaction_work *work)
 {
 	const u8 *data = work->booter_fw->data;
-	u32 fuse_raw, fuse_ver;
+	u32 fuse_raw, fuse_ver, sig_index = 0;
 	u32 index = work->booter_hdr.ucode_id - 1;
+	int ret;
 
 	if (read_bar(work, GU_FUSE_SEC2_UCODE1 + index * 4, &fuse_raw))
 		return GU_RESULT(-EIO);
 	fuse_ver = gpu_unlock_fuse_version(fuse_raw);
-	dev_info(&work->pdev->dev, "Booter signature: fuse_raw=%#x version=%u signatures=%u size=%u\n",
-		fuse_raw, fuse_ver, work->booter_hdr.num_sigs, work->booter_hdr.sig_bytes);
-	return GU_RESULT(gpu_unlock_booter_patch(work->booter_cpu, work->booter_image_size,
-				       &work->booter_hdr,
-				       data + 72 + work->booter_image_size,
-				       work->booter_hdr.sig_bytes, fuse_ver));
+	ret = gpu_unlock_booter_patch(work->booter_cpu, work->booter_image_size,
+				      &work->booter_hdr,
+				      data + 72 + work->booter_image_size,
+				      work->booter_hdr.sig_bytes, fuse_ver, &sig_index);
+	if (ret) {
+		/* -ERANGE here means this board's SEC2 fuse version has no
+		 * signature in the pinned Booter archive: fail-closed, but
+		 * say so explicitly — fuse_ver is the per-board diagnostic
+		 * for sampling fuse versions across models/batches. */
+		dev_err(&work->pdev->dev,
+			"Booter signature: fuse_raw=%#x version=%u signatures=%u size=%u patch failed=%d\n",
+			fuse_raw, fuse_ver, work->booter_hdr.num_sigs,
+			work->booter_hdr.sig_bytes, ret);
+		return GU_RESULT(ret);
+	}
+	dev_info(&work->pdev->dev, "Booter signature: fuse_raw=%#x version=%u signatures=%u size=%u sig_index=%u\n",
+		fuse_raw, fuse_ver, work->booter_hdr.num_sigs, work->booter_hdr.sig_bytes, sig_index);
+	return 0;
 }
 
 static void free_coherent(struct unlock_transaction_work *work)
@@ -969,6 +975,9 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	in->frts_size = 1ull << 20;
 	in->boot_size = work->boot_desc.image_size;
 	in->image_size = work->image_span.size;
+	/* R615 kgspGetNonWprHeapSize for TU102..AD107 (HAL
+	 * kgspGetNonWprHeapSize_ed6b8b, g_kernel_gsp_nvoc.h:2039) returns
+	 * 1048576 = 1 MiB; Blackwell is 3 MiB, Hopper/GB10x 2 MiB. */
 	in->nonwpr_size = 1ull << 20;
 	/* GA102's supported minimum heap; no GSP-RM clients are started here. */
 	in->heap_request = 88ull << 20;
@@ -1376,8 +1385,8 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	if (ad102_readout(work, "after-payload", false))
 		state_ret = -ENODEV;
 	dev_info(&work->pdev->dev,
-		 "AD102 payload result: boot=%d halt=%d marker=%#x expected=%#x marker_ok=%u required_permissions=%u cpuctl=%#x halted=%u debug=%#x ss0=%#x ss1=%#x\n",
-		 ret, halt_ret, marker, GU_AD102_MARKER, marker == GU_AD102_MARKER,
+		 "AD10x payload result: device=%#06x boot=%d halt=%d marker=%#x expected=%#x marker_ok=%u required_permissions=%u cpuctl=%#x halted=%u debug=%#x ss0=%#x ss1=%#x\n",
+		 work->pdev->device, ret, halt_ret, marker, GU_AD102_MARKER, marker == GU_AD102_MARKER,
 		 required, cpuctl, work->sec2_halt_verified, debug, ss0, ss1);
 	if (ret || halt_ret || state_ret || sample_ret || !required ||
 	    marker != GU_AD102_MARKER || !work->sec2_halt_verified)

@@ -212,9 +212,9 @@ ga102_gsps[] = {
 };
 
 #ifdef NOUVEAU_LAB_PIN_GSP_615
-static char *gsp_fw_ver = "615.78.08";
+char *gsp_fw_ver = "615.78.08";
 #else
-static char *gsp_fw_ver;
+char *gsp_fw_ver;
 #endif
 module_param(gsp_fw_ver, charp, 0444);
 MODULE_PARM_DESC(gsp_fw_ver,
@@ -225,15 +225,19 @@ MODULE_PARM_DESC(gsp_fw_ver,
  * Build the probe order: the requested version first, everything else in its
  * default order. Lets a boot test pin one version from the kernel command line
  * without rebuilding, while keeping the rest of the table as fallbacks.
+ * Shared by ga102 and ad102: the table is passed in (defaults, terminated by
+ * a load == NULL entry) and the caller owns the selection buffer.
  */
-static int
-ga102_gsp_fwif_order(struct nvkm_gsp_fwif *selection, unsigned capacity,
-		     const struct nvkm_gsp_fwif *defaults)
+int
+nvkm_gsp_fwif_order(struct nvkm_gsp_fwif *selection, unsigned capacity,
+		    const struct nvkm_gsp_fwif *defaults)
 {
-	unsigned count = 0;
+	unsigned count = 0, ndefaults = 0;
 	bool pinned = false;
 
-	if (capacity < ARRAY_SIZE(ga102_gsps))
+	while (defaults[ndefaults].load)
+		ndefaults++;
+	if (capacity < ndefaults + 1)
 		return -ENOSPC;
 	if (gsp_fw_ver && gsp_fw_ver[0]) {
 		for (unsigned i = 0; defaults[i].load; i++) {
@@ -266,7 +270,7 @@ ga102_gsp_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
 	struct nvkm_gsp_fwif selection[ARRAY_SIZE(ga102_gsps)];
 	int ret;
 
-	ret = ga102_gsp_fwif_order(selection, ARRAY_SIZE(selection), ga102_gsps);
+	ret = nvkm_gsp_fwif_order(selection, ARRAY_SIZE(selection), ga102_gsps);
 	if (ret)
 		return ret;
 	return nvkm_gsp_new_(selection, device, type, inst, pgsp);

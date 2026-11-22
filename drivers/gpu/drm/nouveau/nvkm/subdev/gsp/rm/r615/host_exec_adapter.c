@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-/* GA107 native host-execution adapter. Public MIT 615 TU102/GA102 workflow. */
+/* GA107 and AD10x native host-execution adapter. Public MIT 615 TU102/GA102 workflow. */
 #include <linux/firmware.h>
+#include <linux/kernel.h>
 #include <linux/slab.h>
 #include <core/device.h>
 #include <engine/sec2.h>
@@ -10,6 +11,7 @@
 #include "boot_payload.h"
 #include "host_exec.h"
 #include "pm.h"
+#include "r615_family.h"
 
 struct r615_host {
 	const struct firmware *loader;
@@ -148,19 +150,32 @@ int
 r615_host_new(struct nvkm_gsp *gsp)
 {
 	struct r615_host *host;
+	char name[48];
 	int ret;
 
 	if (!gsp || !gsp->subdev.device || gsp->r615_host || !gsp->rm ||
 	    !gsp->rm->version || strcmp(gsp->rm->version, "615.78.08") ||
-	    gsp->subdev.device->chipset != 0x177)
+	    !r615_chipset_supported(gsp->subdev.device->chipset))
 		return -EOPNOTSUPP;
 	host = kzalloc(sizeof(*host), GFP_KERNEL);
 	if (!host)
 		return -ENOMEM;
-	ret = request_firmware(&host->loader, "nvidia/ga107/gsp/sec2-bl-615.78.08.bin",
-			       gsp->subdev.device->dev);
-	if (!ret)
-		ret = r615_loader_parse(host->loader->data, host->loader->size, &host->view);
+	/* One SEC2 generic-BL image per family. AD10x has no staged file
+	 * yet: the 615 open source ships no AD102 BlUcode bindata and its
+	 * HAL dispatches Ada to the closed stub, so reusing the TU102
+	 * image would be an unvalidated guess (PENDENTE DE EVIDÊNCIA).
+	 * request_firmware fails closed here and oneinit aborts. */
+	snprintf(name, sizeof(name), "nvidia/%s/gsp/sec2-bl-615.78.08.bin",
+		 r615_firmware_dir(gsp->subdev.device->chipset));
+	ret = request_firmware(&host->loader, name, gsp->subdev.device->dev);
+	if (ret) {
+		nvkm_error(&gsp->subdev, "r615: missing SEC2 loader %s (%d)%s\n", name, ret,
+			   r615_chipset_is_ad10x(gsp->subdev.device->chipset) ?
+			   " - no AD10x sec2-bl staged, see firmware-ad102-615.78.08-01/manifest.json" : "");
+		kfree(host);
+		return ret;
+	}
+	ret = r615_loader_parse(host->loader->data, host->loader->size, &host->view);
 	if (ret) {
 		release_firmware(host->loader);
 		kfree(host);
@@ -206,3 +221,4 @@ r615_host_command(struct nvkm_gsp *gsp, u32 command, const void *data, u32 bytes
 }
 
 MODULE_FIRMWARE("nvidia/ga107/gsp/sec2-bl-615.78.08.bin");
+MODULE_FIRMWARE("nvidia/ad102/gsp/sec2-bl-615.78.08.bin");

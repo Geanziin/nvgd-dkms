@@ -112,7 +112,8 @@ gpu_unlock_booter_geometry_match(const struct gpu_unlock_booter_hdr *hdr,
 
 int gpu_unlock_booter_patch(u8 *image, u32 image_size,
 			    const struct gpu_unlock_booter_hdr *hdr,
-			    const u8 *signatures, u32 sig_bytes, u32 fuse_ver)
+			    const u8 *signatures, u32 sig_bytes, u32 fuse_ver,
+			    u32 *sig_index)
 {
 	u32 index, sig_size;
 
@@ -135,6 +136,12 @@ int gpu_unlock_booter_patch(u8 *image, u32 image_size,
 	}
 	memcpy(image + hdr->patch_loc, signatures + (size_t)index * sig_size,
 	       sig_size);
+	/* Report which signature was patched in: the per-board diagnostic
+	 * for fuse_ver (callers log it; a board whose SEC2 fuse version
+	 * has no signature in the pinned archive fails above with
+	 * -ERANGE). */
+	if (sig_index)
+		*sig_index = index;
 	return 0;
 }
 

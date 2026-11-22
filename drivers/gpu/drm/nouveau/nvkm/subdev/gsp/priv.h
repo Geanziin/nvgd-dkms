@@ -29,6 +29,13 @@ int tu102_gsp_load_rm(struct nvkm_gsp *, const struct nvkm_gsp_fwif *);
 
 int gh100_gsp_load(struct nvkm_gsp *, int, const struct nvkm_gsp_fwif *);
 
+/* GSP firmware version pin (module param, defined in ga102.c) and the
+ * shared probe-order builder. Experimental 615 is opt-in: it is only
+ * tried when pinned, never as an implicit promotion or fallback. */
+extern char *gsp_fw_ver;
+int nvkm_gsp_fwif_order(struct nvkm_gsp_fwif *selection, unsigned capacity,
+			const struct nvkm_gsp_fwif *defaults);
+
 #define NVKM_GSP_FIRMWARE_BOOTER(chip,vers)                      \
 MODULE_FIRMWARE("nvidia/"#chip"/gsp/booter_load-"#vers".bin");   \
 MODULE_FIRMWARE("nvidia/"#chip"/gsp/booter_unload-"#vers".bin"); \

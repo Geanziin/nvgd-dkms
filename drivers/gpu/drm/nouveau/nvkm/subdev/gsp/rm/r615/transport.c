@@ -7,6 +7,7 @@
 #include <rm/rm.h>
 
 #include "transport.h"
+#include "r615_family.h"
 
 struct r615_transport {
 	struct nvkm_gsp *gsp;
@@ -24,7 +25,9 @@ struct r615_transport {
 	bool pm_paused, pm_verified;
 };
 
-/* Public 615 TU102 register HAL also selected for GA107 in g_gpu_nvoc.c. */
+/* Public 615 TU102 register HAL also selected for GA107 and AD10x in
+ * g_gpu_nvoc.c; the same 0x110c00 queue base is in the TU102 and GA102
+ * published headers, and Ada has no separate GSP register header. */
 static const u32 r615_transport_registers[] = {
 	[R615_MSGQ_TX_HEAD] = 0x110c00,
 	[R615_MSGQ_TX_TAIL] = 0x110c04,
@@ -36,7 +39,7 @@ static bool
 r615_transport_compatible(struct nvkm_gsp *gsp)
 {
 	return gsp && gsp->subdev.device && gsp->subdev.device->dev &&
-	       gsp->subdev.device->chipset == 0x177 && gsp->rm && gsp->rm->version &&
+	       r615_chipset_supported(gsp->subdev.device->chipset) && gsp->rm && gsp->rm->version &&
 	       !strcmp(gsp->rm->version, "615.78.08");
 }
 

@@ -227,6 +227,10 @@ struct nouveau_drm {
 
 	u8 old_pm_cap;
 
+	/* Tensor unlock (nvgd) sysfs exposure, registered in
+	 * nouveau_drm_device_init / removed in nouveau_drm_device_fini. */
+	bool tensor_unlock_sysfs_registered;
+
 	struct {
 		struct agp_bridge_data *bridge;
 		u32 base;

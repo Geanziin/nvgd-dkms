@@ -2,7 +2,10 @@
 /*
  * NVGD Tensor Core Speed-Select Unlock
  * Unlocks full FP16/BF16/TF32 -> FP32 accumulation tensor throughput (2x rate)
- * on supported NVIDIA Ampere (GA102/GA104/GA106/GA107) and Ada (AD102) GPUs.
+ * on supported NVIDIA Ampere (GA102/GA104/GA106/GA107) and Ada
+ * (AD102/AD103/AD104/AD106/AD107) GPUs. Ada is supported by default only
+ * for the RTX 4090 (AD102 0x2684); all other Ada IDs are experimental
+ * (nvgd.tensor_unlock_experimental=1) and unvalidated on lab hardware.
  */
 #include <linux/pci.h>
 #include <linux/module.h>
@@ -17,10 +20,10 @@
 extern int nvgd_tensor_unlock_enabled;
 extern int nvgd_tensor_unlock_experimental;
 
-/* RTX 4090 and supported desktop GA102/GA104/GA106/GA107 GPU functions. */
+/* RTX 4090 and supported desktop GA102/GA104/GA106/GA107 GPU functions.
+ * Ampere IDs are listed here; Ada IDs come from the single source in
+ * arch_610.h (GPU_UNLOCK_AD10X_SUPPORTED_IDS / _EXPERIMENTAL_IDS). */
 static const unsigned short supported_ids[] = {
-	/* AD102: GeForce RTX 4090 */
-	0x2684,
 	/* GA102 */
 	0x2200, 0x2203, 0x2204, 0x2205, 0x2206, 0x2207, 0x2208, 0x220a,
 	0x220d, 0x2216, 0x222b, 0x222f,
@@ -38,24 +41,18 @@ static const unsigned short supported_ids[] = {
 	0x2584,
 };
 
-static const unsigned short experimental_ids[] = {
-	GU_AD102_RTX_4090_D,
-	GU_AD102_RTX_4070_TI_SUPER,
-	GU_AD103_RTX_4080_SUPER,
-	GU_AD103_RTX_4080,
-	GU_AD103_RTX_4070_TI_SUPER,
-	GU_AD103_RTX_4070,
-	GU_AD103M_RTX_4090_MOBILE,
-	GU_AD104_RTX_4070_TI,
-	GU_AD104_RTX_4070_SUPER,
-	GU_AD104_RTX_4070,
-	GU_AD106_RTX_4060_TI,
-	GU_AD106_RTX_4060_TI_16GB,
-	GU_AD107_RTX_4060,
-	GU_AD107_RTX_4060_LAPTOP,
-	GU_AD107_RTX_4060_MOBILE,
-	GU_AD107_RTX_4050_MOBILE,
+/* Ada IDs, expanded from the single source in arch_610.h so admission
+ * and AD102-family asset routing (unlock_610.c: ad102_family()) can
+ * never desync. */
+#define GU_AD10X_ID(id) id,
+static const unsigned short supported_ada_ids[] = {
+	GPU_UNLOCK_AD10X_SUPPORTED_IDS(GU_AD10X_ID)
 };
+
+static const unsigned short experimental_ids[] = {
+	GPU_UNLOCK_AD10X_EXPERIMENTAL_IDS(GU_AD10X_ID)
+};
+#undef GU_AD10X_ID
 
 static bool is_supported_gpu(struct pci_dev *pdev)
 {
@@ -69,6 +66,11 @@ static bool is_supported_gpu(struct pci_dev *pdev)
 			return true;
 	}
 
+	for (i = 0; i < ARRAY_SIZE(supported_ada_ids); i++) {
+		if (pdev->device == supported_ada_ids[i])
+			return true;
+	}
+
 	if (nvgd_tensor_unlock_experimental) {
 		for (i = 0; i < ARRAY_SIZE(experimental_ids); i++) {
 			if (pdev->device == experimental_ids[i])
@@ -79,24 +81,33 @@ static bool is_supported_gpu(struct pci_dev *pdev)
 	return false;
 }
 
-int nvgd_tensor_unlock(struct pci_dev *pdev)
+/* Known Ada ID that is experimental-gated, for the refusal log. */
+static bool is_experimental_gpu(struct pci_dev *pdev)
 {
-	struct gpu_unlock_610_shared shared = { 0 };
+	unsigned int i;
+
+	if (pdev->vendor != PCI_VENDOR_ID_NVIDIA)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(experimental_ids); i++) {
+		if (pdev->device == experimental_ids[i])
+			return true;
+	}
+
+	return false;
+}
+
+/* Read the four FEAT speed-select words (PLM, readout, SS0, SS1) at
+ * BAR0 + 0x00823800. Shared by the probe early check and the post-resume
+ * status report; read-only, safe to call while the driver is bound. */
+static void read_feat_state(struct pci_dev *pdev, u32 *plm, u32 *ss0, u32 *ss1, u32 *readout)
+{
 	void __iomem *bar0;
-	u32 plm = 0, ss0 = 0, ss1 = 0, readout = 0;
 	u16 cmd = 0;
 	bool mem_enabled = false;
-	int ret;
 
-	if (!nvgd_tensor_unlock_enabled)
-		return 0;
+	*plm = *ss0 = *ss1 = *readout = 0;
 
-	if (!is_supported_gpu(pdev))
-		return 0;
-
-	/* Early check: Is the GPU already unlocked?
-	 * We briefly map the feature registers at BAR0 + 0x00823800 and inspect SS0 and SS1.
-	 */
 	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
 	if (!(cmd & PCI_COMMAND_MEMORY)) {
 		pci_write_config_word(pdev, PCI_COMMAND, cmd | PCI_COMMAND_MEMORY);
@@ -105,20 +116,55 @@ int nvgd_tensor_unlock(struct pci_dev *pdev)
 
 	bar0 = ioremap(pci_resource_start(pdev, 0) + 0x00823800, 0x100);
 	if (bar0) {
-		plm = readl(bar0 + (GU_FEAT_PLM_OFFSET - 0x00823800));
-		readout = readl(bar0 + (GU_FEAT_READOUT_1_OFFSET - 0x00823800));
-		ss0 = readl(bar0 + (GU_FEAT_SS0_OFFSET - 0x00823800));
-		ss1 = readl(bar0 + (GU_FEAT_SS1_OFFSET - 0x00823800));
+		*plm = readl(bar0 + (GU_FEAT_PLM_OFFSET - 0x00823800));
+		*readout = readl(bar0 + (GU_FEAT_READOUT_1_OFFSET - 0x00823800));
+		*ss0 = readl(bar0 + (GU_FEAT_SS0_OFFSET - 0x00823800));
+		*ss1 = readl(bar0 + (GU_FEAT_SS1_OFFSET - 0x00823800));
 		iounmap(bar0);
 	}
 
 	if (mem_enabled)
 		pci_write_config_word(pdev, PCI_COMMAND, cmd);
+}
+
+/* SS0/SS1 at maximum speed select, or PLM fully open.
+ * All-ones in every word is the inaccessible-BAR signature (device powered
+ * down, e.g. runtime-suspended), NOT an unlocked GPU: the unlock writes
+ * SS0=0x88888888, SS1=0x8, never all-ones. Without this guard a suspended
+ * GPU would read back as unlocked (PLM == ~0u). */
+static bool feat_unlocked(u32 plm, u32 ss0, u32 ss1)
+{
+	if (plm == ~0u && ss0 == ~0u && ss1 == ~0u)
+		return false;
+	return (ss0 == GU_SS0_UNLOCK && (ss1 & 0xf) == GU_SS1_UNLOCK) || plm == ~0u;
+}
+
+int nvgd_tensor_unlock(struct pci_dev *pdev)
+{
+	struct gpu_unlock_610_shared shared = { 0 };
+	u32 plm = 0, ss0 = 0, ss1 = 0, readout = 0;
+	int ret;
+
+	if (!nvgd_tensor_unlock_enabled)
+		return 0;
+
+	if (!is_supported_gpu(pdev)) {
+		if (is_experimental_gpu(pdev))
+			pci_info(pdev, "nvgd: tensor unlock not applied: device %#06x is experimental, enable with nvgd.tensor_unlock_experimental=1\n",
+				 pdev->device);
+		else
+			pci_info(pdev, "nvgd: tensor unlock not supported on device %#06x, continuing with stock speed\n",
+				 pdev->device);
+		return 0;
+	}
+
+	/* Early check: is the GPU already unlocked? */
+	read_feat_state(pdev, &plm, &ss0, &ss1, &readout);
 
 	/* If SS0 and SS1 are already set to 0x88888888 and 0x8, or PLM is fully open,
 	 * the GPU tensor cores are already at maximum speed select.
 	 */
-	if ((ss0 == GU_SS0_UNLOCK && (ss1 & 0xf) == GU_SS1_UNLOCK) || plm == ~0u) {
+	if (feat_unlocked(plm, ss0, ss1)) {
 		pci_info(pdev, "nvgd: tensor cores already unlocked (SS0=%#010x SS1=%#x readout=%#010x PLM=%#010x), full speed enabled\n",
 			 ss0, ss1, readout, plm);
 		return 0;
@@ -146,4 +192,43 @@ int nvgd_tensor_unlock(struct pci_dev *pdev)
 	}
 
 	return 0;
+}
+
+/* Post-resume unlock state report.
+ *
+ * Suspend/resume (D3hot) powers the chip down; whether the FEAT
+ * speed-select state survives is hardware-dependent and UNVALIDATED on
+ * any Ada GPU (PENDENTE DE HARDWARE). The unlock transaction is NOT
+ * re-run here: it requires a cold, unbound GPU (gpu_unlock_610_unlock),
+ * and re-running FLR + SEC2 under a bound, resumed driver is untested
+ * and could wedge resume. So resume only REPORTS the state — a lost
+ * unlock needs a full power cycle to come back (and, if the card was
+ * re-initialised by a driver without the unlock in the meantime, the
+ * -EBUSY "power off first" rule applies). Read-only: safe while the
+ * driver is bound. */
+void nvgd_tensor_unlock_status(struct pci_dev *pdev)
+{
+	u32 plm = 0, ss0 = 0, ss1 = 0, readout = 0;
+
+	if (!nvgd_tensor_unlock_enabled || !is_supported_gpu(pdev))
+		return;
+
+	read_feat_state(pdev, &plm, &ss0, &ss1, &readout);
+	if (feat_unlocked(plm, ss0, ss1))
+		pci_info(pdev, "nvgd: tensor unlock still active after resume (SS0=%#010x SS1=%#x readout=%#010x PLM=%#010x)\n",
+			 ss0, ss1, readout, plm);
+	else
+		pci_warn(pdev, "nvgd: tensor unlock LOST on suspend/resume (SS0=%#010x SS1=%#x readout=%#010x PLM=%#010x) — stock speed until next power cycle; the unlock is not re-applied at resume\n",
+			 ss0, ss1, readout, plm);
+}
+
+/* Current FEAT speed-select state, for sysfs/telemetry (read-only BAR
+ * reads; safe while the driver is bound). On a powered-down device the
+ * BAR reads all-ones and feat_unlocked() reports false. */
+void nvgd_tensor_unlock_read_state(struct pci_dev *pdev,
+				   struct nvgd_tensor_unlock_state *state)
+{
+	state->supported = is_supported_gpu(pdev);
+	read_feat_state(pdev, &state->plm, &state->ss0, &state->ss1, &state->readout);
+	state->unlocked = feat_unlocked(state->plm, state->ss0, state->ss1);
 }

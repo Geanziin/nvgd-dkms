@@ -22,8 +22,8 @@ typedef uint64_t u64;
 #define GU_BOOTER_IMAGE_SIZE_AD102 56832u
 #define GU_BOOTER_SIG_TOTAL 768u
 
-/* Tested AD102 PCI ID using the pinned AD102-family Booter assets. */
-#define GU_AD102_RTX_4090 0x2684u
+/* Tested AD102 PCI ID using the pinned AD102-family Booter assets:
+ * GU_AD102_RTX_4090, defined with the other Ada IDs in arch_610.h. */
 #define GU_V67_SIZE 0xfa00u
 #define GU_WPR_META_SIZE 256u
 #define GU_WPR_META_MAGIC 0xdc3aae21371a60b3ull
@@ -103,7 +103,8 @@ gpu_unlock_booter_geometry_match(const struct gpu_unlock_booter_hdr *hdr,
 
 int gpu_unlock_booter_patch(u8 *image, u32 image_size,
 			    const struct gpu_unlock_booter_hdr *hdr,
-			    const u8 *signatures, u32 sig_bytes, u32 fuse_ver);
+			    const u8 *signatures, u32 sig_bytes, u32 fuse_ver,
+			    u32 *sig_index);
 
 int gpu_unlock_elf_section(const u8 *elf, size_t length, const char *name,
 			   struct gpu_unlock_span *span);
