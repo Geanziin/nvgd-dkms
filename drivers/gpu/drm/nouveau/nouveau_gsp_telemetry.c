@@ -204,13 +204,22 @@ nouveau_gsp_telemetry_init(struct drm_device *dev)
 	struct nvkm_gsp *gsp;
 	int ret;
 
-	if (!nouveau_gsp_tm_api(drm, &gsp))
-		return 0;
-	/* The group is the sysfs owner; remove it before teardown drains readers. */
+	/* The busy-percent group needs no GSP-RM telemetry: the video
+	 * engines use driver-side accounting (nouveau_engine_busy.h),
+	 * initialised before this call.  gpu_busy_percent reads fail
+	 * gracefully (-ENODEV) without the telemetry API, as documented
+	 * above.  Create the group whenever the driver runs, so userspace
+	 * can probe for NVENC/NVDEC support on RM backends without a
+	 * telemetry API (r535/r570, e.g. Ada); only the hwmon device
+	 * genuinely needs the API.
+	 * The group is the sysfs owner; remove it before teardown drains readers. */
 	ret = sysfs_create_group(&dev->dev->kobj, &nouveau_gsp_tm_group);
 	if (ret)
 		return ret;
 	drm->gsp_tm_group = true;
+
+	if (!nouveau_gsp_tm_api(drm, &gsp))
+		return 0;
 	hwmon = hwmon_device_register_with_info(dev->dev, "nouveau", dev,
 						&nouveau_gsp_tm_chip, nouveau_gsp_tm_extra);
 	if (IS_ERR(hwmon)) {
